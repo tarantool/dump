@@ -17,10 +17,10 @@ Here's why:
 
 ```require('dump').dump('/path/to/logical/backup')```
 
-- dumps all space and index definitions, users, roles and privileges. Each space is dumped into a subdirectory of the path provided in the first argument.
+dumps all space and index definitions, users, roles and privileges. Each space is dumped into a subdirectory of the path provided in the first argument.
 
 - dumps all spaces, 
 
-```require('dump').restore('/path/to/logical/backup')
+```require('dump').restore('/path/to/logical/backup')```
 
-- restores a logical dump.
+restores a logical dump.
