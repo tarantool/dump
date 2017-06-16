@@ -1,5 +1,5 @@
 
-<a href="https://travis-ci.org/tarantool/dump"><img src="https://travis-ci.org/tarantool/dump.png?branch=master" align="left"></a><br/>
+<a href="https://travis-ci.org/tarantool/dump"><img src="https://travis-ci.org/tarantool/dump.png?branch=master" align="right"></a><br/>
 
 
 # dump <img src="https://github.com/tarantool/dump/blob/master/docs/truck.png?raw=true" align="right"> 
