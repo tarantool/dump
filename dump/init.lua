@@ -173,7 +173,7 @@ local function restore_stream_new(restore_stream, path)
     local function to_id(file)
         return tonumber(string.match(fio.basename(file), "^%d+"))
     end
-    files = fun.iter(files):map(to_id):totable()
+    files = fun.map(to_id, files):totable()
     table.sort(files)
     local restore_object = { path = path; files = files; spaces = 0; rows = 0; }
     setmetatable(restore_object,  { __index = restore_stream_vtab; })
