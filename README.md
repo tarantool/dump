@@ -15,11 +15,17 @@ Here's why:
 
 ## How to use
 
+### Preparation
+
+Ensure the database is not being changed while dump or restore is in progress.
+
+### Execution
+
 ```require('dump').dump('/path/to/logical/backup')```
 
 dumps all space and index definitions, users, roles and privilege, and space datas. Each space is dumped into a subdirectory of the path provided in the first argument.
 
-
 ```require('dump').restore('/path/to/logical/backup')```
 
 restores a logical dump.
+
