@@ -1,5 +1,9 @@
 
-# dump <img src="https://github.com/tarantool/dump/blob/master/docs/truck.png?raw=true" align="right"/> 
+<a href="https://travis-ci.org/tarantool/dump"><img src="https://travis-ci.org/tarantool/dump.png?branch=master" align="left"></a><br/>
+
+
+# dump <img src="https://github.com/tarantool/dump/blob/master/docs/truck.png?raw=true" align="right"> 
+
 
 Logical backup and restore of a tarantool instance.
 
