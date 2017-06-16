@@ -1,0 +1,17 @@
+Source: tarantool-dump
+Priority: optional
+Section: database
+Maintainer: Konstantin Osipov <kostja@tarantool.org>
+Build-Depends: debhelper (>= 9), tarantool (>= 1.6.8.0)
+Standards-Version: 3.9.8
+Homepage: https://github.com/tarantool/dump
+Vcs-Git: git://github.com/tarantool/dump.git
+Vcs-Browser: https://github.com/tarantool/dump
+
+Package: tarantool-dump
+Architecture: all
+Depends: tarantool (>= 1.6.8.0), ${shlibs:Depends}, ${misc:Depends}
+Pre-Depends: ${misc:Pre-Depends}
+Description: Logical backup and restore for Tarantool
+ Backup all spaces into a set of files, one for each space. Restore from the
+ files at any time.

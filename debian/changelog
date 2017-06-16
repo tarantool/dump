@@ -1,0 +1,5 @@
+tarantool-dump (1.0.0-1) unstable; urgency=medium
+
+  * Initial release 
+
+ -- Konstantin Osipov <kostja@tarantool.org>  Fri, 16 Feb 2017 15:42:33 +0300

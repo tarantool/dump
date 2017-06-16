@@ -1,0 +1,5 @@
+tarantool-dump/
+files
+stamp-*
+*.substvars
+*.log
