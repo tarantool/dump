@@ -11,6 +11,7 @@ local fio = require('fio')
 local json = require('json')
 local msgpack = require('msgpackffi')
 local errno = require('errno')
+local fun = require('fun')
 
 --
 -- Utility functions
@@ -95,7 +96,7 @@ local function end_dump_space(stream, space_id)
         return nil, string.format("Failed to close file %s, errno %d (%s)",
             stream.files[space_id].path, errno(), errno.strerror())
     end
-    local rows = stream.files[space_id].rows 
+    local rows = stream.files[space_id].rows
     if rows == 0 then
         log.verbose("Space %s was empty", box.space[space_id].name)
         fio.unlink(stream.files[space_id].path)
@@ -131,7 +132,7 @@ local function dump_stream_new(dump_stream, path)
     if not status then
         return nil, msg
     end
-    local dump_object = { path = path; files = {}; spaces = 0, rows = 0 }
+    local dump_object = { path = path; files = {}; spaces = 0; rows = 0; }
     setmetatable(dump_object,  { __index = dump_stream_vtab; })
     return dump_object
 end
@@ -146,14 +147,37 @@ local dump_stream =
 -- Restore stream
 --
 
-local function restore_stream_pairs()
+local function restore_stream_pairs(restore_object)
+    return function(restore_object, pairs)
+    end
+
 end
 
 -- Create a restore stream object for path
-local function restore_stream_new(path)
+local function restore_stream_new(restore_stream, path)
     local restore_stream_vtab = {
         __pairs = restore_stream_pairs,
     }
+    local stat = fio.stat(path)
+    if not stat then
+        return nil, string.format("Path %s does not exist", path)
+    end
+    if not stat:is_dir() then
+        return nil, string.format("Path %s is not a directory", path)
+    end
+    local files = fio.glob(fio.pathjoin(path, "*.dump"))
+    if not files then
+        return nil, string.format("Failed to read %s, errno %d (%s)", path,
+            errno(), errno.strerror())
+    end
+    local function to_id(file)
+        return tonumber(string.match(fio.basename(file), "^%d+"))
+    end
+    files = fun.iter(files):map(to_id):totable()
+    table.sort(files)
+    local restore_object = { path = path; files = files; spaces = 0; rows = 0; }
+    setmetatable(restore_object,  { __index = restore_stream_vtab; })
+    return restore_object
 end
 
 -- Restore stream module
@@ -232,21 +256,22 @@ end
 -- Restore all spaces from the backup stored at the given path.
 --
 local function restore(path)
-    local stream = restore_stram:new(path)
+    local stream = restore_stream:new(path)
     --
     -- Iterate over all spaces in the path, and restore data
     --
-    for k, space_stream in pairs(stream) do
+--    for k, id in pairs(stream.files) do
     --
     --  The restore stream iterates over system spaces first,
     --  so all user defined spaces should be created by the time
     --  they are  restored
     --
-        local space = box.space[space_stream.id]
-        for k, v in pairs(space_stream) do
-            space:replce(v)
-        end
-    end
+--        local space = box.space[id]
+--        local space_stream = space_stream:new(path, id)
+--        for k, v in pairs(space_stream) do
+--            space:replce(v)
+--        end
+--    end
 end
 
 --
