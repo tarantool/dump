@@ -27,7 +27,7 @@ Ensure the database is not being changed while dump or restore is in progress.
 
 ```require('dump').dump('/path/to/logical/backup')```
 
-dumps all space and index definitions, users, roles and privilege, and space datas. Each space is dumped into a subdirectory of the path provided in the first argument.
+The path should not exist, or be an empty directory. It is create if it does not exist. The command then dumps all space and index definitions, users, roles and privilege, and space data. Each space is dumped into a file in the path named `<space-id>.dump`.
 
 ```require('dump').restore('/path/to/logical/backup')```
 
