@@ -25,6 +25,31 @@ local function space__space_filter(tuple)
 end
 
 local function mkpath(path, interim)
+    local stat = fio.stat(path)
+    if stat then
+        if not stat:is_dir() then
+            return nil, string.format("File %s exists and is not a directory",
+                path)
+        end
+        --
+        -- It's OK for interim dirs to contain files.
+        --
+        if interim then
+            return true
+        end
+        local files = fio.glob(fio.pathjoin(path, "*"))
+        if not files then
+            return nil, string.format("Failed to read directory %s, errno %d (%s)",
+                path, errno(), errno.strerror())
+        end
+        --
+        -- The leaf directory must be empty.
+        --
+        if #files > 0 then
+            return nil, string.format("Directory %s is not empty", path)
+        end
+        return true
+    end
     local dir = fio.dirname(path)
     if not dir then
         return nil, string.format("Incorrect path: %s", path)
@@ -36,24 +61,7 @@ local function mkpath(path, interim)
             return nil, msg
         end
     end
-    --
-    -- The directory must be empty, if it exists
-    --
-    if not interim then
-        if not stat:is_dir() then
-            return nil, string.format("File %s exists and is not a directory",
-                path)
-        end
-        local files = fio.glob(path)
-        if not files then
-            return nil, string.format("Failed to read directory %s, errno %d (%s)",
-                path, errno(), errno.strerror())
-        end
-        if #files > 0 then
-            return nil, string.format("Directory %s is not empty", path)
-        end
-    end
-    if not fio.mkdir(path) then
+    if not fio.mkdir(path, 488) then
         return nil, string.format("Failed to create directory %s, errno %d (%s)",
             path, errno(), errno.strerror());
     end
@@ -66,31 +74,36 @@ end
 
 -- Create a file in the dump directory
 local function begin_dump_space(stream, space_id)
+    log.verbose("Started dumping space %s", box.space[space_id].name)
     local path = fio.pathjoin(stream.path, string.format("%d.dump", space_id))
-    local fh = fio.open(path, {'O_APPEND', 'O_CREAT'}, {"S_IRUSR", "S_IRGRP"})
+    local fh = fio.open(path, {'O_APPEND', 'O_CREAT', 'O_WRONLY'}, {'S_IRUSR', 'S_IRGRP'})
+    fh:write("test")
     if not fh then
         return nil, string.format("Can't open file %s, errno %d (%s)",
             path, errno(), errno.strerror())
     end
     stream.files[space_id] = { path = path; fh = fh; rows = 0; }
-    if not space_is_system(space_id) then
-        stream.spaces = stream.spaces + 1
-    end
     return true
 end
 
 -- Close and sync the file
 local function end_dump_space(stream, space_id)
+    log.verbose("Ended dumping space %s", box.space[space_id].name)
     local fh = stream.files[space_id].fh
     fh:fsync()
     if not fh:close() then
         return nil, string.format("Failed to close file %s, errno %d (%s)",
             stream.files[space_id].path, errno(), errno.strerror())
     end
-    if stream.files[space_id].rows == 0 then
+    local rows = stream.files[space_id].rows 
+    if rows == 0 then
+        log.verbose("Space %s was empty", box.space[space_id].name)
         fio.unlink(stream.files[space_id].path)
+    else
+        log.verbose("Space %s had %d rows", box.space[space_id].name, rows)
+        stream.spaces = stream.spaces + 1
     end
-    stream.rows = stream.rows + stream.files[space_id].rows
+    stream.rows = stream.rows + rows
     stream.files[space_id] = nil
     return true
 end
@@ -98,7 +111,8 @@ end
 -- Write tuple data (in msgpack) to a file
 local function dump_tuple(stream, space_id, tuple)
     local fh = stream.files[space_id].fh
-    if fh:write(msgpack.encode(tuple)) then
+    local res = fh:write(msgpack.encode(tuple))
+    if not res then
         return nil, string.format("Failed to write to file %s, errno %d (%s)",
             stream.files[space_id].path, errno(), errno.strerror())
     end
@@ -158,16 +172,17 @@ local function dump_space(stream, space, filter)
         return nil, msg
     end
     for k, v in space:pairs() do
-        if filter(v) then
-            ::continue::
+        if filter and filter(v) then
+            goto continue
         end
-        status, msg = stream:dump_tuple(space_id, v)
+        local status, msg = stream:dump_tuple(space_id, v)
         if not status then
-            stream:end_dump_space()
+            stream:end_dump_space(space_id)
             return nil, msg
         end
+        ::continue::
     end
-    status, msg = stream:end_dump_space(space_id)
+    local status, msg = stream:end_dump_space(space_id)
     if not status then
         return nil, msg
     end
@@ -184,26 +199,32 @@ local function dump(path)
     if not stream then
         return nil, msg
     end
-    local status
     --
     -- Dump system spaces: apply a filter to not dump
     -- system data, which is also stored in system spaces.
     -- This data will already exist at restore.
     --
-    status, msg = dump_space(stream, box.space._space, space__space_filter)
+    local status, msg = dump_space(stream, box.space._space, space__space_filter)
     if not status then
         return nil, msg
     end
---    dump_space(stream, box.space._index, space__space_filter)
+    local status, msg = dump_space(stream, box.space._index, space__space_filter)
+    if not status then
+        return nil, msg
+    end
 
     -- dump all other spaces
---    for k, v in pairs(box.space._space) do
---        local space_id = v[1]
---        if space_is_system(space_id) then
---            ::continue::
---            dump_space(stream, box.space[space_id])
---        end
---    end
+    for k, v in box.space._space:pairs() do
+        local space_id = v[1]
+        if space_is_system(space_id) then
+            goto continue
+        end
+        local status, msg = dump_space(stream, box.space[space_id])
+        if not status then
+            return nil, msg
+        end
+        ::continue::
+    end
     return { spaces = stream.spaces; rows = stream.rows; }
 end
 
