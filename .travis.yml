@@ -18,11 +18,8 @@ env:
       - OS=el DIST=7
       - OS=fedora DIST=24
       - OS=fedora DIST=25
-      - OS=ubuntu DIST=precise
-      - OS=ubuntu DIST=trusty
       - OS=ubuntu DIST=xenial
       - OS=ubuntu DIST=yakkety
-      - OS=debian DIST=wheezy
       - OS=debian DIST=jessie
       - OS=debian DIST=stretch
 
