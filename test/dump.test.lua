@@ -7,12 +7,22 @@ local fiber = require('fiber')
 
 local test = tap.test('dump tests')
 
-test:plan(2)
+test:plan(3)
 
 function basic(test)
     test:plan(2)
     test:is(type(dump.dump), "function", "Dump function is present")
     test:is(type(dump.restore), "function", "Restore function is present")
+end
+
+function box_is_configured(test)
+    test:plan(4)
+    local status, msg = dump.dump("/tmp/1")
+    test:is(status, nil, "Dump before box.cfg{} status")
+    test:like(msg, "box.cfg", "Dump before box.cfg{} message")
+    local status, msg = dump.restore("/tmp/1")
+    test:is(status, nil, "Restore before box.cfg{} status")
+    test:like(msg, "box.cfg", "Restore before box.cfg{} message")
 end
 
 function dump_and_restore(test)
@@ -55,6 +65,7 @@ function dump_and_restore(test)
 end
 
 test:test('basic', basic)
+test:test('box_is_configured', box_is_configured)
 
 box.cfg{}
 

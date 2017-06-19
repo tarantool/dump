@@ -71,6 +71,13 @@ end
 
 local croak = type(log.verbose) == 'function' and log.verbose or log.info
 
+local function box_is_configured()
+    if type(box.cfg) == "function" then
+        return nil, "Please start the database with box.cfg{} first"
+    end
+    return true
+end
+
 -- }}} Utility functions
 
 -- Dump stream {{{
@@ -299,6 +306,10 @@ end
 -- Then dump all other spaces.
 --
 local function dump(path)
+    local status, msg = box_is_configured()
+    if not status then
+        return nil, msg
+    end
     local stream, msg = dump_stream:new(path)
     if not stream then
         return nil, msg
@@ -336,6 +347,10 @@ end
 -- Restore all spaces from the backup stored at the given path.
 --
 local function restore(path)
+    local status, msg = box_is_configured()
+    if not status then
+        return nil, msg
+    end
     local stream, msg = restore_stream:new(path)
     if not stream then
         return nil, msg
