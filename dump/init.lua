@@ -184,10 +184,6 @@ local function restore_stream_new(restore_stream, path)
     return restore_object
 end
 
-
--- 1 MB readahead buffer
-local CHUNK_SIZE = 1024 * 1024
-
 local function space_stream_read(stream)
     if stream.pos == string.len(stream.data) + 1 then
         return nil
