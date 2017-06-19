@@ -69,6 +69,8 @@ local function mkpath(path, interim)
     return true
 end
 
+local croak = type(log.verbose) == 'function' and log.verbose or log.info
+
 -- }}} Utility functions
 
 -- Dump stream {{{
@@ -76,7 +78,7 @@ end
 
 -- Create a file in the dump directory
 local function begin_dump_space(stream, space_id)
-    log.verbose("Started dumping space %s", box.space[space_id].name)
+    croak("Started dumping space %s", box.space[space_id].name)
     local path = fio.pathjoin(stream.path, string.format("%d.dump", space_id))
     local fh = fio.open(path, {'O_APPEND', 'O_CREAT', 'O_WRONLY'}, {'S_IRUSR', 'S_IRGRP'})
     if not fh then
@@ -92,7 +94,7 @@ end
 -- instead.
 -- Update dump stats.
 local function end_dump_space(stream, space_id)
-    log.verbose("Ended dumping space %s", box.space[space_id].name)
+    croak("Ended dumping space %s", box.space[space_id].name)
     local fh = stream.files[space_id].fh
     fh:fsync()
     if not fh:close() then
@@ -101,10 +103,10 @@ local function end_dump_space(stream, space_id)
     end
     local rows = stream.files[space_id].rows
     if rows == 0 then
-        log.verbose("Space %s was empty", box.space[space_id].name)
+        croak("Space %s was empty", box.space[space_id].name)
         fio.unlink(stream.files[space_id].path)
     else
-        log.verbose("Space %s had %d rows", box.space[space_id].name, rows)
+        croak("Space %s had %d rows", box.space[space_id].name, rows)
         stream.spaces = stream.spaces + 1
     end
     stream.rows = stream.rows + rows
@@ -156,7 +158,7 @@ local dump_stream =
 -- Scans the path, finds all dump files and prepares
 -- them for restore.
 local function restore_stream_new(restore_stream, path)
-    log.verbose("Reading contents of %s", path)
+    croak("Reading contents of %s", path)
     local stat = fio.stat(path)
     if not stat then
         return nil, string.format("Path %s does not exist", path)
@@ -177,7 +179,7 @@ local function restore_stream_new(restore_stream, path)
     -- Ensure restore processes spaces in the same order
     -- as checkpoint recovery
     table.sort(files)
-    log.verbose("Found %d files", #files)
+    croak("Found %d files", #files)
     local restore_object = { path = path; files = files; spaces = 0; rows = 0; }
     return restore_object
 end
@@ -201,7 +203,7 @@ end
 
 -- Restore data in a single space
 local function space_stream_restore(space_stream)
-    log.verbose("Started restoring space %s", space_stream.space.name)
+    croak("Started restoring space %s", space_stream.space.name)
     local tuple, msg = space_stream_read(space_stream)
     while tuple do
         space_stream.space:replace(tuple)
@@ -211,7 +213,7 @@ local function space_stream_restore(space_stream)
     if msg then
         return nil, msg
     end
-    log.verbose("Loaded %d rows in space %s", space_stream.rows,
+    croak("Loaded %d rows in space %s", space_stream.rows,
         space_stream.space.name)
     return true
 end
