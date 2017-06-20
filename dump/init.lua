@@ -12,6 +12,12 @@ local json = require('json')
 local msgpackffi = require('msgpackffi')
 local errno = require('errno')
 local fun = require('fun')
+local buffer = require('buffer')
+local ffi = require('ffi')
+
+-- Constants
+
+local BUFSIZ = 1024*1024
 
 -- Utility functions {{{
 --
@@ -78,6 +84,25 @@ local function box_is_configured()
     return true
 end
 
+ffi.cdef[[
+
+size_t
+box_tuple_bsize(const box_tuple_t *tuple);
+
+ssize_t
+box_tuple_to_buf(const box_tuple_t *tuple, char *buf, size_t size);
+
+]]
+
+local builtin = ffi.C
+
+local function tuple_to_buf(tuple, buf)
+	local bsize = builtin.box_tuple_bsize(tuple)
+	buf:reserve(bsize)
+	builtin.box_tuple_to_buf(tuple, buf.wpos, bsize)
+	buf.wpos = buf.wpos + bsize
+end
+
 -- }}} Utility functions
 
 -- Dump stream {{{
@@ -92,7 +117,25 @@ local function begin_dump_space(stream, space_id)
         return nil, string.format("Can't open file %s, errno %d (%s)",
             path, errno(), errno.strerror())
     end
-    stream.files[space_id] = { path = path; fh = fh; rows = 0; }
+    stream.files[space_id] = {
+        path = path;
+        fh = fh;
+        rows = 0;
+        buf = buffer.ibuf(BUFSIZ)
+    }
+    return true
+end
+
+-- Flush dump buffer
+local function flush_dump_stream(stream, space_id)
+    local buf = stream.files[space_id].buf
+    local fh = stream.files[space_id].fh
+    local res = fh:write(ffi.string(buf.buf, buf.wpos - buf.buf))
+    if not res then
+        return nil, string.format("Failed to write to file %s, errno %d (%s)",
+            stream.files[space_id].path, errno(), errno.strerror())
+    end
+	buf:reset()
     return true
 end
 
@@ -101,6 +144,10 @@ end
 -- instead.
 -- Update dump stats.
 local function end_dump_space(stream, space_id)
+    local status, msg = flush_dump_stream(stream, space_id)
+    if not status then
+        return nil, msg
+    end
     croak("Ended dumping space %s", box.space[space_id].name)
     local fh = stream.files[space_id].fh
     fh:fsync()
@@ -123,11 +170,13 @@ end
 
 -- Write tuple data (in msgpack) to a file
 local function dump_tuple(stream, space_id, tuple)
-    local fh = stream.files[space_id].fh
-    local res = fh:write(msgpackffi.encode(tuple))
-    if not res then
-        return nil, string.format("Failed to write to file %s, errno %d (%s)",
-            stream.files[space_id].path, errno(), errno.strerror())
+    local buf = stream.files[space_id].buf
+    tuple_to_buf(tuple, buf)
+    if buf:size() > BUFSIZ/2 then
+        local status, msg = flush_dump_stream(stream, space_id)
+        if not status then
+            return nil, msg
+        end
     end
     stream.files[space_id].rows = stream.files[space_id].rows + 1
     return true
@@ -145,7 +194,12 @@ local function dump_stream_new(dump_stream, path)
     if not status then
         return nil, msg
     end
-    local dump_object = { path = path; files = {}; spaces = 0; rows = 0; }
+    local dump_object = {
+        path = path;
+        files = {};
+        spaces = 0;
+        rows = 0;
+    }
     setmetatable(dump_object,  { __index = dump_stream_vtab; })
     return dump_object
 end

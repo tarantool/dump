@@ -41,21 +41,26 @@ end
 
 function dump_and_restore(test)
     test:plan(1)
-    local ROWS = 200
+    local ROWS = 2000
+    local TXN_ROWS = 100
     box.schema.space.create('memtx')
     box.space.memtx:create_index('pk')
     box.schema.space.create('vinyl', {engine = 'vinyl'})
     box.space.vinyl:create_index('pk')
-    box.begin()
-    for i = 1, ROWS do
-        box.space.memtx:insert{i, fiber.time()}
+    for i = 0, ROWS/TXN_ROWS do
+        box.begin()
+        for j = 1, TXN_ROWS do
+            box.space.memtx:insert{i*TXN_ROWS + j, fiber.time()}
+        end
+        box.commit()
     end
-    box.commit()
-    box.begin()
-    for i = 1, ROWS do
-        box.space.vinyl:insert{i, fiber.time()}
+    for i = 0, ROWS/TXN_ROWS do
+        box.begin()
+        for j = 1, TXN_ROWS do
+            box.space.vinyl:insert{i*TXN_ROWS + j, fiber.time()}
+        end
+        box.commit()
     end
-    box.commit()
     local dir = fio.tempdir()
     dump.dump(dir)
     box.space.memtx:drop()
