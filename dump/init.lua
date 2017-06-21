@@ -354,6 +354,10 @@ local function dump_space(stream, space, filter)
     end
 
     -- iterate in batches using GT iterator
+    -- HASH index supports GT iterator and, in absence
+    -- of data changes, re-positions the iterator
+    -- to the bucket where the key resides, if the key
+    -- is specified
     local options = {iterator = 'GT', limit = 200}
     local last_key
     local batch

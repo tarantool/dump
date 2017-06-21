@@ -47,14 +47,14 @@ function dump_and_restore(test)
     box.space.memtx:create_index('pk')
     box.schema.space.create('vinyl', {engine = 'vinyl'})
     box.space.vinyl:create_index('pk')
-    for i = 0, ROWS/TXN_ROWS do
+    for i = 0, ROWS/TXN_ROWS - 1 do
         box.begin()
         for j = 1, TXN_ROWS do
             box.space.memtx:insert{i*TXN_ROWS + j, fiber.time()}
         end
         box.commit()
     end
-    for i = 0, ROWS/TXN_ROWS do
+    for i = 0, ROWS/TXN_ROWS - 1 do
         box.begin()
         for j = 1, TXN_ROWS do
             box.space.vinyl:insert{i*TXN_ROWS + j, fiber.time()}
@@ -117,7 +117,7 @@ local function dump_hash_index(test)
     local TXN_ROWS = 100
     box.schema.space.create('hash')
     box.space.hash:create_index('pk', {type='hash', parts = {1, 'str'}})
-    for i = 0, ROWS/TXN_ROWS do
+    for i = 0, ROWS/TXN_ROWS - 1 do
         box.begin()
         for j = 1, TXN_ROWS do
             box.space.hash:insert{tostring(i*TXN_ROWS + j), fiber.time()}
@@ -148,7 +148,7 @@ test:plan(7)
 test:test('Basics', basic)
 test:test('Using the rock without calling box.cfg{}', box_is_configured)
 
-box.cfg{}
+box.cfg{log_level=6}
 
 test:test('Dump and restore', dump_and_restore)
 test:test('Dump into a non-writable directory', dump_access_denied)
