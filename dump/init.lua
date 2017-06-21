@@ -345,7 +345,6 @@ local function dump_space(stream, space, filter)
         batch = space:select({}, options)
     end
     while #batch > 0 do
-        last_key = tuple_extract_key(batch[#batch], space)
         for _, v in ipairs(batch) do
             if filter and filter(v) then
                 goto continue
@@ -357,6 +356,7 @@ local function dump_space(stream, space, filter)
             end
             ::continue::
         end
+        last_key = tuple_extract_key(batch[#batch], space)
         batch = space:select(last_key, options)
     end
 

@@ -70,7 +70,7 @@ function dump_and_restore(test)
     for i = 1, ROWS do
         local i1 = box.space.memtx:get{i}
         local i2 = box.space.vinyl:get{i}
-        if i1 and i2 and i1[1] == i2[1] then
+        if i1 and i2 and i1[1] == i2[1] and i1[1] == i then
            rows = rows + 1
         end
     end
@@ -111,7 +111,39 @@ local function restore_no_such_path(test)
     test:is(type(msg), "string", "Restore of a non-existent dir provides error message")
 end
 
-test:plan(6)
+local function dump_hash_index(test)
+    test:plan(2)
+    local ROWS = 2000
+    local TXN_ROWS = 100
+    box.schema.space.create('hash')
+    box.space.hash:create_index('pk', {type='hash', parts = {1, 'str'}})
+    for i = 0, ROWS/TXN_ROWS do
+        box.begin()
+        for j = 1, TXN_ROWS do
+            box.space.hash:insert{tostring(i*TXN_ROWS + j), fiber.time()}
+        end
+        box.commit()
+    end
+    local dir = fio.tempdir()
+    dump.dump(dir)
+    box.space.hash:drop()
+    dump.restore(dir)
+    test:is(box.space.hash.index[0].type, 'HASH',
+        "Restored space has HASH primary key")
+    local rows = 0
+    for i = 1, ROWS do
+        local key = tostring(i)
+        local i1 = box.space.hash:get{key}
+        if i1 and i1[1] == key then
+           rows = rows + 1
+        end
+    end
+    test:is(rows, ROWS, "The number of rows is correct after restore")
+    box.space.hash:drop()
+    rmpath(dir)
+end
+
+test:plan(7)
 
 test:test('Basics', basic)
 test:test('Using the rock without calling box.cfg{}', box_is_configured)
@@ -122,5 +154,6 @@ test:test('Dump and restore', dump_and_restore)
 test:test('Dump into a non-writable directory', dump_access_denied)
 test:test('Dump into a non-empty directory', dump_after_dump)
 test:test('Restore of a non-existent path', restore_no_such_path)
+test:test('Dump and restore of a space with HASH primary key', dump_hash_index)
 
 os.exit(test:check() == true and 0 or -1)
