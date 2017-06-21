@@ -85,22 +85,25 @@ local function box_is_configured()
 end
 
 ffi.cdef[[
-
 size_t
 box_tuple_bsize(const box_tuple_t *tuple);
 
 ssize_t
 box_tuple_to_buf(const box_tuple_t *tuple, char *buf, size_t size);
-
 ]]
 
 local builtin = ffi.C
 
 local function tuple_to_buf(tuple, buf)
-	local bsize = builtin.box_tuple_bsize(tuple)
-	buf:reserve(bsize)
-	builtin.box_tuple_to_buf(tuple, buf.wpos, bsize)
-	buf.wpos = buf.wpos + bsize
+    local bsize = builtin.box_tuple_bsize(tuple)
+    buf:reserve(bsize)
+    builtin.box_tuple_to_buf(tuple, buf.wpos, bsize)
+    buf.wpos = buf.wpos + bsize
+end
+
+local function tuple_extract_key(tuple, space)
+    return fun.map(function(x) return tuple[x.fieldno] end,
+        space.index[0].parts):totable()
 end
 
 -- }}} Utility functions
@@ -135,7 +138,7 @@ local function flush_dump_stream(stream, space_id)
         return nil, string.format("Failed to write to file %s, errno %d (%s)",
             stream.files[space_id].path, errno(), errno.strerror())
     end
-	buf:reset()
+    buf:reset()
     return true
 end
 
@@ -331,17 +334,33 @@ local function dump_space(stream, space, filter)
     if not status then
         return nil, msg
     end
-    for k, v in space:pairs() do
-        if filter and filter(v) then
-            goto continue
-        end
-        local status, msg = stream:dump_tuple(space_id, v)
-        if not status then
-            stream:end_dump_space(space_id)
-            return nil, msg
-        end
-        ::continue::
+
+    -- iterate in batches using GT iterator
+    local options = {iterator = 'GT', limit = 200}
+    local last_key
+    local batch
+    if not space.index[0] then
+        batch = {}
+    else
+        batch = space:select({}, options)
     end
+    while #batch > 0 do
+        last_key = tuple_extract_key(batch[#batch], space)
+        for _, v in ipairs(batch) do
+            if filter and filter(v) then
+                goto continue
+            end
+            local status, msg = stream:dump_tuple(space_id, v)
+            if not status then
+                stream:end_dump_space(space_id)
+                return nil, msg
+            end
+            ::continue::
+        end
+        batch = space:select(last_key, options)
+    end
+
+    -- end of dump
     local status, msg = stream:end_dump_space(space_id)
     if not status then
         return nil, msg
