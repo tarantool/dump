@@ -265,10 +265,28 @@ end
 local function space_stream_restore(space_stream)
     croak("Started restoring space %s", space_stream.space.name)
     local tuple, msg = space_stream_read(space_stream)
+    local TXN_ROWS
+    if space_is_system(space_stream.space.id) then
+        TXN_ROWS = 1
+    else
+        TXN_ROWS = 200
+    end
+    local txn_rows = 0
     while tuple do
+        if TXN_ROWS > 1 and txn_rows == 0 then
+            box.begin()
+        end
         space_stream.space:replace(tuple)
+        txn_rows = txn_rows + 1
+        if TXN_ROWS > 1 and txn_rows == TXN_ROWS then
+            box.commit()
+            txn_rows = 0
+        end
         space_stream.rows = space_stream.rows + 1
         tuple, msg = space_stream_read(space_stream)
+    end
+    if TXN_ROWS > 1 and txn_rows then
+        box.commit()
     end
     if msg then
         return nil, msg
