@@ -9,7 +9,7 @@
 local log = require('log')
 local fio = require('fio')
 local json = require('json')
-local msgpackffi = require('msgpackffi')
+local msgpack = require('msgpack')
 local errno = require('errno')
 local fun = require('fun')
 local buffer = require('buffer')
@@ -84,23 +84,6 @@ local function box_is_configured()
     return true
 end
 
-ffi.cdef[[
-size_t
-box_tuple_bsize(const box_tuple_t *tuple);
-
-ssize_t
-box_tuple_to_buf(const box_tuple_t *tuple, char *buf, size_t size);
-]]
-
-local builtin = ffi.C
-
-local function tuple_to_buf(tuple, buf)
-    local bsize = builtin.box_tuple_bsize(tuple)
-    buf:reserve(bsize)
-    builtin.box_tuple_to_buf(tuple, buf.wpos, bsize)
-    buf.wpos = buf.wpos + bsize
-end
-
 local function tuple_extract_key(tuple, space)
     return fun.map(function(x) return tuple[x.fieldno] end,
         space.index[0].parts):totable()
@@ -133,7 +116,7 @@ end
 local function flush_dump_stream(stream, space_id)
     local buf = stream.files[space_id].buf
     local fh = stream.files[space_id].fh
-    local res = fh:write(ffi.string(buf.buf, buf.wpos - buf.buf))
+    local res = fh:write(buf.rpos, buf:size())
     if not res then
         return nil, string.format("Failed to write to file %s, errno %d (%s)",
             stream.files[space_id].path, errno(), errno.strerror())
@@ -174,7 +157,7 @@ end
 -- Write tuple data (in msgpack) to a file
 local function dump_tuple(stream, space_id, tuple)
     local buf = stream.files[space_id].buf
-    tuple_to_buf(tuple, buf)
+    msgpack.encode(tuple, buf)
     if buf:size() > BUFSIZ/2 then
         local status, msg = flush_dump_stream(stream, space_id)
         if not status then
@@ -248,51 +231,85 @@ local function restore_stream_new(restore_stream, path)
     return restore_object
 end
 
-local function space_stream_read(stream)
-    if stream.pos == string.len(stream.data) + 1 then
+-- Decode the next tuple stored in the stream buffer and
+-- advance the buffer position accordingly. Return nil if
+-- the decoder failed.
+local function space_stream_next_tuple(stream)
+    local status, tuple, rpos = pcall(msgpack.decode,
+        stream.buf.rpos, stream.buf:size())
+    if not status then
         return nil
     end
-    local tuple, pos = msgpackffi.decode_unchecked(stream.data, stream.pos)
-    if tuple == nil then
-        return nil, string.format("Failed to decode tuple: trailing bytes in the input stream %s",
-            stream.path)
-    end
-    stream.pos = pos
+    stream.buf.rpos = rpos
     return tuple
 end
 
+-- Read in more data from the dump file to the stream buffer.
+-- Return the number of bytes read on success, nil on failure.
+local function space_stream_read(stream)
+    if stream.buf.rpos ~= stream.buf.buf then
+        -- Move whatever is left in the buffer
+        -- to the beginning.
+        local buf = buffer.ibuf(BUFSIZ)
+        ffi.copy(buf:alloc(stream.buf:size()),
+            stream.buf.rpos, stream.buf:size())
+        stream.buf:recycle()
+        stream.buf = buf
+    end
+    local len = stream.fh:read(stream.buf:reserve(BUFSIZ), BUFSIZ)
+    if not len or len == 0 then
+        stream.fh:close()
+    end
+    if not len then
+        return nil, string.format("Failed to read file %s, errno %d, (%s)",
+            stream.path, errno(), errno.strerror())
+    end
+    stream.buf:alloc(len)
+    return len
+end
+
 -- Restore data in a single space
-local function space_stream_restore(space_stream)
-    croak("Started restoring space %s", space_stream.space.name)
-    local tuple, msg = space_stream_read(space_stream)
-    local TXN_ROWS
-    if space_is_system(space_stream.space.id) then
-        TXN_ROWS = 1
-    else
-        TXN_ROWS = 200
+local function space_stream_restore(stream)
+    croak("Started restoring space %s", stream.space.name)
+    -- System spaces do not support multi-statement transactions.
+    local TXN_ROWS = space_is_system(stream.space.id) and 1 or 200
+    if TXN_ROWS > 1 then
+        box.begin()
     end
-    local txn_rows = 0
-    while tuple do
-        if TXN_ROWS > 1 and txn_rows == 0 then
-            box.begin()
+    while true do
+        local tuple = space_stream_next_tuple(stream)
+        if not tuple then
+            -- Commit the current transaction, because read() yields.
+            if TXN_ROWS > 1 then
+                box.commit()
+            end
+            local len, err = space_stream_read(stream)
+            if not len then
+                return false, err -- read error
+            end
+            if len == 0 and stream.buf:size() > 0 then
+                return false, string.format("Failed to decode tuple: " ..
+                    "trailing bytes in the input stream %s", stream.path)
+            end
+            if TXN_ROWS > 1 then
+                box.begin()
+            end
+            if len == 0 then
+                break -- eof
+            end
+        else
+            if stream.rows % TXN_ROWS == 1 then
+                box.commit()
+                box.begin()
+            end
+            stream.space:replace(tuple)
+            stream.rows = stream.rows + 1
         end
-        space_stream.space:replace(tuple)
-        txn_rows = txn_rows + 1
-        if TXN_ROWS > 1 and txn_rows == TXN_ROWS then
-            box.commit()
-            txn_rows = 0
-        end
-        space_stream.rows = space_stream.rows + 1
-        tuple, msg = space_stream_read(space_stream)
     end
-    if TXN_ROWS > 1 and txn_rows then
+    if TXN_ROWS > 1 then
         box.commit()
     end
-    if msg then
-        return nil, msg
-    end
-    croak("Loaded %d rows in space %s", space_stream.rows,
-        space_stream.space.name)
+    croak("Loaded %d rows in space %s", stream.rows, stream.space.name)
     return true
 end
 
@@ -304,27 +321,17 @@ local function space_stream_new(dir, space_id)
             space_id)
     end
     local path = fio.pathjoin(dir, string.format("%d.dump", space_id))
-    local stat = fio.stat(path)
-    if not stat then
-        return nil, string.format("Failed to open file %s, errno %d, (%s)",
-            path, errno(), errno.strerror());
-    end
     local fh = fio.open(path, {'O_RDONLY'})
     if fh == nil then
         return nil, string.format("Can't open file '%s', errno %d (%s)",
             path, errno(), errno.strerror())
     end
-    local data = fh:read(stat.size)
-    fh:close()
-    if not data or string.len(data) < stat.size then
-        return nil, string.format("Failed to read file %s, errno %d, (%s",
-            path, errno(), errno.strerror())
-    end
     local space_stream = {
         space = space;
-        pos = 1;
-        data = data;
+        path = path;
+        fh = fh;
         rows = 0;
+        buf = buffer.ibuf(BUFSIZ);
     }
     local space_stream_vtab = {
         restore = space_stream_restore;
