@@ -39,3 +39,7 @@ named `<space-id>.dump`.
 ```require('dump').restore('/path/to/logical/backup')```
 
 This command restores a logical dump.
+
+### Details
+
+The backup utility creates a file for each dumped space, using space id for file name. If you want to restore only a single space, restore from a directory which contains its dump file and nothing else. The dump skips spaces with id < 512 (the system spaces), with the exception of tuples which contain metadata of user-defined spaces, to ensure smooth restore on an empty instance. If you want to restore data into an existing space, delete files with ids < 512 from the dump directory.
