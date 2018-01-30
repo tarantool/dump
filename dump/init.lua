@@ -170,7 +170,7 @@ end
 
 -- Create a dump  stream object for path
 -- Creates the path if it doesn't exist.
-local function dump_stream_new(dump_stream, path)
+local function dump_stream_new(dump_stream, path, opts)
     local dump_stream_vtab = {
         begin_dump_space = begin_dump_space;
         end_dump_space = end_dump_space;
@@ -182,6 +182,7 @@ local function dump_stream_new(dump_stream, path)
     end
     local dump_object = {
         path = path;
+        opts = opts;
         files = {};
         spaces = 0;
         rows = 0;
@@ -204,7 +205,7 @@ local dump_stream =
 -- Create a restore stream object for a path
 -- Scans the path, finds all dump files and prepares
 -- them for restore.
-local function restore_stream_new(restore_stream, path)
+local function restore_stream_new(restore_stream, path, opts)
     croak("Reading contents of %s", path)
     local stat = fio.stat(path)
     if not stat then
@@ -227,7 +228,13 @@ local function restore_stream_new(restore_stream, path)
     -- as checkpoint recovery
     table.sort(files)
     croak("Found %d files", #files)
-    local restore_object = { path = path; files = files; spaces = 0; rows = 0; }
+    local restore_object = {
+        path = path;
+        opts = opts;
+        files = files;
+        spaces = 0;
+        rows = 0;
+    }
     return restore_object
 end
 
@@ -241,7 +248,7 @@ local function space_stream_next_tuple(stream)
         return nil
     end
     stream.buf.rpos = rpos
-    return tuple
+    return box.tuple.new(tuple)
 end
 
 -- Read in more data from the dump file to the stream buffer.
@@ -302,8 +309,11 @@ local function space_stream_restore(stream)
                 box.commit()
                 box.begin()
             end
-            stream.space:replace(tuple)
-            stream.rows = stream.rows + 1
+            tuple = stream.opts.filter(stream.space, tuple)
+            if tuple ~= nil then
+                stream.space:replace(tuple)
+                stream.rows = stream.rows + 1
+            end
         end
     end
     if TXN_ROWS > 1 then
@@ -314,7 +324,7 @@ local function space_stream_restore(stream)
 end
 
 -- Create a new stream to restore a single space
-local function space_stream_new(dir, space_id)
+local function space_stream_new(dir, space_id, opts)
     local space = box.space[space_id]
     if space == nil then
         return nil, string.format("The dump directory is missing metadata for space %d",
@@ -329,6 +339,7 @@ local function space_stream_new(dir, space_id)
     local space_stream = {
         space = space;
         path = path;
+        opts = opts;
         fh = fh;
         rows = 0;
         buf = buffer.ibuf(BUFSIZ);
@@ -348,6 +359,33 @@ local restore_stream = {
 -- }}} Restore stream
 
 -- {{{ Database-wide dump and restore
+
+local common_opts_template = {
+    filter = function(space, tuple) return tuple end,
+}
+
+local dump_opts_template = common_opts_template
+local restore_opts_template = common_opts_template
+
+local function check_opts(opts, template)
+    opts = opts or {}
+    for k, v in pairs(opts) do
+        local default = template[k]
+        if default == nil then
+            return nil, string.format("Invalid option '%s'", k)
+        end
+        if type(default) ~= type(v) then
+            return nil, string.format("Invalid value for option '%s': expected %s, got %s",
+                k, type(default), type(v))
+        end
+    end
+    for k, v in pairs(template) do
+        if opts[k] == nil then
+            opts[k] = v
+        end
+    end
+    return opts
+end
 
 --
 -- Dump data from a single space into a stream.
@@ -376,6 +414,10 @@ local function dump_space(stream, space, filter)
     while #batch > 0 do
         for _, v in ipairs(batch) do
             if filter and filter(v) then
+                goto continue
+            end
+            v = stream.opts.filter(space, v)
+            if v == nil then
                 goto continue
             end
             local status, msg = stream:dump_tuple(space_id, v)
@@ -407,12 +449,16 @@ end
 -- system functions, users, roles and grants.
 -- Then dump all other spaces.
 --
-local function dump(path)
+local function dump(path, opts)
+    local opts, msg = check_opts(opts, dump_opts_template)
+    if not opts then
+        return nil, msg
+    end
     local status, msg = box_is_configured()
     if not status then
         return nil, msg
     end
-    local stream, msg = dump_stream:new(path)
+    local stream, msg = dump_stream:new(path, opts)
     if not stream then
         return nil, msg
     end
@@ -448,12 +494,16 @@ end
 --
 -- Restore all spaces from the backup stored at the given path.
 --
-local function restore(path)
+local function restore(path, opts)
+    local opts, msg = check_opts(opts, restore_opts_template)
+    if not opts then
+        return nil, msg
+    end
     local status, msg = box_is_configured()
     if not status then
         return nil, msg
     end
-    local stream, msg = restore_stream:new(path)
+    local stream, msg = restore_stream:new(path, opts)
     if not stream then
         return nil, msg
     end
@@ -465,7 +515,7 @@ local function restore(path)
         --  so all user defined spaces should be created by the time
         --  they are  restored
         --
-        local space_stream, msg = space_stream_new(stream.path, space_id)
+        local space_stream, msg = space_stream_new(stream.path, space_id, opts)
         if not space_stream then
             return nil, msg
         end

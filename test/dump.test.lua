@@ -24,9 +24,23 @@ local function rmpath(path)
 end
 
 function basic(test)
-    test:plan(2)
+    test:plan(10)
     test:is(type(dump.dump), "function", "Dump function is present")
     test:is(type(dump.restore), "function", "Restore function is present")
+    local status, msg = dump.dump('dir', {invalid = true})
+    test:is(status, nil, "Unknown dump option - status")
+    test:is(msg, "Invalid option 'invalid'", "Unknown dump option - message")
+    local status, msg = dump.restore('dir', {invalid = true})
+    test:is(status, nil, "Unknown restore option - status")
+    test:is(msg, "Invalid option 'invalid'", "Unknown restore option - message")
+    local status, msg = dump.dump('dir', {filter = true})
+    test:is(status, nil, "Invalid value of dump option - status")
+    test:is(msg, "Invalid value for option 'filter': expected function, got boolean", 
+        "Invalid value of dump option - message")
+    local status, msg = dump.restore('dir', {filter = true})
+    test:is(status, nil, "Invalid value of restore option - status")
+    test:is(msg, "Invalid value for option 'filter': expected function, got boolean", 
+        "Invalid value of restore option - message")
 end
 
 function box_is_configured(test)
@@ -99,6 +113,7 @@ local function dump_after_dump(test)
     test:is(not status, false, "First dump is successful")
     local status, msg = dump.dump(dir)
     test:is(not status, true, "Second dump fails")
+    box.space.test:drop()
     rmpath(dir)
 end
 
@@ -143,7 +158,65 @@ local function dump_hash_index(test)
     rmpath(dir)
 end
 
-test:plan(7)
+local function dump_filter(test)
+    test:plan(3)
+    local space = box.schema.space.create('test')
+    local space_id = space.id
+    space:create_index('pk')
+    space:insert{1, 'ignore'}
+    space:insert{2, 'update'}
+    space:insert{3, 'filter'}
+    local dir = fio.tempdir()
+    dump.dump(dir, {
+        filter = function(space, tuple)
+            if space.id ~= space_id then return tuple end
+            if tuple[2] == 'ignore' then return tuple end
+            if tuple[2] == 'filter' then return nil end
+            if tuple[2] == 'update' then
+                return tuple:update{{'=', 2, 'updated'}}
+            end
+        end,
+    })
+    space:drop()
+    dump.restore(dir)
+    space = box.space.test
+    test:is(space:get(1)[2], 'ignore', "Dump filter can ignore a tuple")
+    test:is(space:get(2)[2], 'updated', "Dump filter can update a tuples")
+    test:is(space:get(3), nil, "Dump filter can filter out a tuple")
+    space:drop()
+    rmpath(dir)
+end
+
+local function restore_filter(test)
+    test:plan(3)
+    local space = box.schema.space.create('test')
+    local space_id = space.id
+    space:create_index('pk')
+    space:insert{1, 'ignore'}
+    space:insert{2, 'update'}
+    space:insert{3, 'filter'}
+    local dir = fio.tempdir()
+    dump.dump(dir)
+    space:drop()
+    dump.restore(dir, {
+        filter = function(space, tuple)
+            if space.id ~= space_id then return tuple end
+            if tuple[2] == 'ignore' then return tuple end
+            if tuple[2] == 'filter' then return nil end
+            if tuple[2] == 'update' then
+                return tuple:update{{'=', 2, 'updated'}}
+            end
+        end,
+    })
+    space = box.space.test
+    test:is(space:get(1)[2], 'ignore', "Restore filter can ignore a tuple")
+    test:is(space:get(2)[2], 'updated', "Restore filter can update a tuple")
+    test:is(space:get(3), nil, "Restore filter can filter out a tuple")
+    space:drop()
+    rmpath(dir)
+end
+
+test:plan(9)
 
 test:test('Basics', basic)
 test:test('Using the rock without calling box.cfg{}', box_is_configured)
@@ -155,5 +228,7 @@ test:test('Dump into a non-writable directory', dump_access_denied)
 test:test('Dump into a non-empty directory', dump_after_dump)
 test:test('Restore of a non-existent path', restore_no_such_path)
 test:test('Dump and restore of a space with HASH primary key', dump_hash_index)
+test:test('Dump filter', dump_filter)
+test:test('Restore filter', restore_filter)
 
 os.exit(test:check() == true and 0 or -1)
