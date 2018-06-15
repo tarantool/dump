@@ -7,8 +7,8 @@ License: BSD
 URL: https://github.com/tarantool/dump
 Source0: dump-%{version}.tar.gz
 BuildArch: noarch
-BuildRequires: tarantool-devel >= 1.6.8.0
-Requires: tarantool >= 1.6.8.0
+BuildRequires: tarantool >= 1.9.0
+Requires: tarantool >= 1.9.0
 
 %description
 This package provides logical dump and restore for Tarantool.
