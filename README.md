@@ -29,14 +29,17 @@ Ensure that the database is not being changed while dump or restore is in progre
 
 ### Execution
 
-```require('dump').dump('/path/to/logical/backup')```
+```local status, error = require('dump').dump('/path/to/logical/backup')```
 
 The path should not exist, or be an empty directory. It is created if it does
 not exist. The command then dumps all space and index definitions, users, roles
 and privileges, and space data. Each space is dumped into a file in the path
 named `<space-id>.dump`.
 
-```require('dump').restore('/path/to/logical/backup')```
+```local status, error = require('dump').restore('/path/to/logical/backup')```
+
+Please note that this module does not throw exceptions, and uses Lua conventions for
+errors: check the return value explicitly to see if your dump or restore has succeeded.
 
 This command restores a logical dump.
 
