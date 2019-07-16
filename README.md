@@ -23,6 +23,13 @@ Here's why:
 
 ## How to use
 
+This module takes each space in Tarantool and dumps it into a file in a specified directory.
+This includes data for system spaces _space and _index, which are dumped first. The restore
+is performed in the opposite order, when files for restore are sorted according to their id 
+(system spaces have id < 512, so their data is naturally restored first). Restoring the system 
+spaces first ensures that all *definitions* for user-defined spaces are already in place when a 
+user-defined space dump file is restored.
+
 ### Preparation
 
 Ensure that the database is not being changed while dump or restore is in progress.
@@ -66,4 +73,4 @@ dump.restore('dump', {
 
 ### Details
 
-The backup utility creates a file for each dumped space, using space id for file name. If you want to restore only a single space, restore from a directory which contains its dump file and nothing else. The dump skips spaces with id < 512 (the system spaces), with the exception of tuples which contain metadata of user-defined spaces, to ensure smooth restore on an empty instance. If you want to restore data into an existing space, delete files with ids < 512 from the dump directory.
+The backup utility creates a file for each dumped space, using space id for file name. The dump skips spaces with id < 512 (the system spaces), with the exception of tuples which contain metadata of user-defined spaces, to ensure smooth restore on an empty instance. If you want to restore data into an existing space, delete files with ids < 512 from the dump directory and create the destination space manually with Lua during restore. Alternatively, you can keep all files with id < 512, this will restore or space definitions, and your particular space file, and pass this to dump. For more intellectual filtering, use dump/restore filtering.
