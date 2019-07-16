@@ -43,6 +43,27 @@ errors: check the return value explicitly to see if your dump or restore has suc
 
 This command restores a logical dump.
 
+### Advanced usage
+
+You can use a filter function as an additional argument to dump and restore.
+A filter is a function that takes a space and a tuple and returns a tuple. 
+This function is called for each dumped/restored tuple. It can be used to overwrite
+what is written to the dump file or restored. If it returns nil the tuple is skipped.
+
+For example, 'filter' option can be used to convert memtx spaces to vinyl as
+shown below:
+```
+dump.restore('dump', {
+    filter = function(space, tuple)
+        if space.id == box.schema.SPACE_ID then
+            return tuple:update{{'=', 4, 'vinyl'}}
+        else
+            return tuple
+        end
+    end
+})
+```
+
 ### Details
 
 The backup utility creates a file for each dumped space, using space id for file name. If you want to restore only a single space, restore from a directory which contains its dump file and nothing else. The dump skips spaces with id < 512 (the system spaces), with the exception of tuples which contain metadata of user-defined spaces, to ensure smooth restore on an empty instance. If you want to restore data into an existing space, delete files with ids < 512 from the dump directory.
